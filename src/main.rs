@@ -46,11 +46,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             // Define a simple widget
             let paragraph = Paragraph::new("Welcome to Ratatui!\nPress 'q' to quit.")
                 .alignment(Alignment::Center)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(" Main Window "),
-                );
+                .block(Block::default().borders(Borders::ALL).title(" Rat Race"));
 
             // Render the widget
             f.render_widget(paragraph, size);
