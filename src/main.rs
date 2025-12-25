@@ -70,9 +70,22 @@ struct TodoItem {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
 enum Status {
-    Todo,
-    Completed,
+    Todo = 0,
+    Completed = 1,
+}
+
+impl TryFrom<u8> for Status {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Status::Todo),
+            1 => Ok(Status::Completed),
+            _ => Err(()),
+        }
+    }
 }
 
 impl Default for App {
@@ -240,10 +253,8 @@ impl App {
     /// Changes the status of the selected list item
     fn toggle_status(&mut self) {
         if let Some(i) = self.todo_list.state.selected() {
-            self.todo_list.items[i].status = match self.todo_list.items[i].status {
-                Status::Completed => Status::Todo,
-                Status::Todo => Status::Completed,
-            }
+            let current_status = self.todo_list.items[i].status as u8;
+            self.todo_list.items[i].status = Status::try_from(1 - current_status).unwrap();
         }
     }
 }
