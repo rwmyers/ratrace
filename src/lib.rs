@@ -1,5 +1,8 @@
+pub mod db;
+
 #[derive(Debug)]
 pub struct TodoItem {
+    pub id: i32,
     pub todo: String,
     pub info: String,
     pub status: Status,
@@ -13,8 +16,9 @@ pub enum Status {
 }
 
 impl TodoItem {
-    pub fn new(status: Status, todo: &str, info: &str) -> Self {
+    pub fn new(id: i32, status: Status, todo: &str, info: &str) -> Self {
         Self {
+            id,
             status,
             todo: todo.to_string(),
             info: info.to_string(),

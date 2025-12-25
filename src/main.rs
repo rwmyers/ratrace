@@ -11,11 +11,11 @@ use ratatui::{
     symbols,
     text::Line,
     widgets::{
-        Block, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph,
+        Block, Borders, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph,
         StatefulWidget, Widget, Wrap,
     },
 };
-use ratrace::{Status, TodoItem};
+use ratrace::{db, Status, TodoItem};
 
 const TODO_HEADER_STYLE: Style = Style::new().fg(SLATE.c100).bg(BLUE.c800);
 const NORMAL_ROW_BG: Color = SLATE.c950;
@@ -26,6 +26,7 @@ const COMPLETED_TEXT_FG_COLOR: Color = GREEN.c500;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
+    db::init_db()?;
     let terminal = ratatui::init();
     let app_result = App::default().run(terminal);
     ratatui::restore();
@@ -65,61 +66,17 @@ struct App {
 
 impl Default for App {
     fn default() -> Self {
+        let items = db::get_all_todos().unwrap_or_default();
         Self {
             should_exit: false,
-            todo_list: TodoList::from_iter([
-                (
-                    Status::Todo,
-                    "Rewrite everything with Rust!",
-                    "I can't hold my inner voice. He tells me to rewrite the complete universe with Rust",
-                ),
-                (
-                    Status::Completed,
-                    "Rewrite all of your tui apps with Ratatui",
-                    "Yes, you heard that right. Go and replace your tui with Ratatui.",
-                ),
-                (
-                    Status::Todo,
-                    "Pet your cat",
-                    "Minnak loves to be pet by you! Don't forget to pet and give some treats!",
-                ),
-                (
-                    Status::Todo,
-                    "Walk with your dog",
-                    "Max is bored, go walk with him!",
-                ),
-                (
-                    Status::Completed,
-                    "Pay the bills",
-                    "Pay the train subscription!!!",
-                ),
-                (
-                    Status::Completed,
-                    "Refactor list example",
-                    "If you see this info that means I completed this task!",
-                ),
-            ]),
+            todo_list: TodoList {
+                items,
+                state: ListState::default(),
+            },
             app_state: AppState::Viewing,
             new_todo_title: String::new(),
             new_todo_info: String::new(),
         }
-    }
-}
-
-impl TodoList {
-    fn add_todo(&mut self, todo_item: TodoItem) {
-        self.items.push(todo_item);
-    }
-}
-
-impl FromIterator<(Status, &'static str, &'static str)> for TodoList {
-    fn from_iter<I: IntoIterator<Item = (Status, &'static str, &'static str)>>(iter: I) -> Self {
-        let items = iter
-            .into_iter()
-            .map(|(status, todo, info)| TodoItem::new(status, todo, info))
-            .collect();
-        let state = ListState::default();
-        Self { items, state }
     }
 }
 
@@ -144,6 +101,9 @@ impl App {
                 KeyCode::Char('q') | KeyCode::Esc => self.should_exit = true,
                 KeyCode::Char('a') => {
                     self.app_state = AppState::Adding(InputState::default());
+                }
+                KeyCode::Char('d') => {
+                    self.delete_todo();
                 }
                 KeyCode::Char('h') | KeyCode::Left => self.select_none(),
                 KeyCode::Char('j') | KeyCode::Down => self.select_next(),
@@ -181,11 +141,7 @@ impl App {
                 }
                 KeyCode::Enter => {
                     if !self.new_todo_title.is_empty() {
-                        self.todo_list.add_todo(TodoItem::new(
-                            Status::Todo,
-                            &self.new_todo_title,
-                            &self.new_todo_info,
-                        ));
+                        self.add_todo();
                         self.new_todo_title.clear();
                         self.new_todo_info.clear();
                         self.app_state = AppState::Viewing;
@@ -193,6 +149,19 @@ impl App {
                 }
                 _ => {}
             },
+        }
+    }
+
+    fn add_todo(&mut self) {
+        db::add_todo(Status::Todo, &self.new_todo_title, &self.new_todo_info).unwrap();
+        self.refresh_todos();
+    }
+
+    fn delete_todo(&mut self) {
+        if let Some(i) = self.todo_list.state.selected() {
+            let id = self.todo_list.items[i].id;
+            db::delete_todo(id).unwrap();
+            self.refresh_todos();
         }
     }
 
@@ -218,9 +187,16 @@ impl App {
     /// Changes the status of the selected list item
     fn toggle_status(&mut self) {
         if let Some(i) = self.todo_list.state.selected() {
+            let id = self.todo_list.items[i].id;
             let current_status = self.todo_list.items[i].status as u8;
-            self.todo_list.items[i].status = Status::try_from(1 - current_status).unwrap();
+            let new_status = Status::try_from(1 - current_status).unwrap();
+            db::update_status(id, new_status).unwrap();
+            self.refresh_todos();
         }
+    }
+
+    fn refresh_todos(&mut self) {
+        self.todo_list.items = db::get_all_todos().unwrap_or_default();
     }
 }
 
@@ -367,7 +343,7 @@ impl App {
             .block(info_block)
             .fg(TEXT_FG_COLOR);
 
-        Clear.render(modal_area, buf);
+        ratatui::widgets::Clear.render(modal_area, buf);
         Block::new()
             .title("Add New Todo")
             .borders(Borders::ALL)
