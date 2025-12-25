@@ -15,6 +15,7 @@ use ratatui::{
         StatefulWidget, Widget, Wrap,
     },
 };
+use ratrace::{Status, TodoItem};
 
 const TODO_HEADER_STYLE: Style = Style::new().fg(SLATE.c100).bg(BLUE.c800);
 const NORMAL_ROW_BG: Color = SLATE.c950;
@@ -29,6 +30,11 @@ fn main() -> Result<()> {
     let app_result = App::default().run(terminal);
     ratatui::restore();
     app_result
+}
+
+pub struct TodoList {
+    items: Vec<TodoItem>,
+    state: ListState,
 }
 
 enum AppState {
@@ -55,37 +61,6 @@ struct App {
     app_state: AppState,
     new_todo_title: String,
     new_todo_info: String,
-}
-
-struct TodoList {
-    items: Vec<TodoItem>,
-    state: ListState,
-}
-
-#[derive(Debug)]
-struct TodoItem {
-    todo: String,
-    info: String,
-    status: Status,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(u8)]
-enum Status {
-    Todo = 0,
-    Completed = 1,
-}
-
-impl TryFrom<u8> for Status {
-    type Error = ();
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Status::Todo),
-            1 => Ok(Status::Completed),
-            _ => Err(()),
-        }
-    }
 }
 
 impl Default for App {
@@ -145,16 +120,6 @@ impl FromIterator<(Status, &'static str, &'static str)> for TodoList {
             .collect();
         let state = ListState::default();
         Self { items, state }
-    }
-}
-
-impl TodoItem {
-    fn new(status: Status, todo: &str, info: &str) -> Self {
-        Self {
-            status,
-            todo: todo.to_string(),
-            info: info.to_string(),
-        }
     }
 }
 
@@ -328,7 +293,7 @@ impl App {
             .enumerate()
             .map(|(i, todo_item)| {
                 let color = alternate_colors(i);
-                ListItem::from(todo_item).bg(color)
+                todo_item_to_list_item(todo_item).bg(color)
             })
             .collect();
 
@@ -437,14 +402,12 @@ const fn alternate_colors(i: usize) -> Color {
     }
 }
 
-impl From<&TodoItem> for ListItem<'_> {
-    fn from(value: &TodoItem) -> Self {
-        let line = match value.status {
-            Status::Todo => Line::styled(format!(" ☐ {}", value.todo), TEXT_FG_COLOR),
-            Status::Completed => {
-                Line::styled(format!(" ✓ {}", value.todo), COMPLETED_TEXT_FG_COLOR)
-            }
-        };
-        ListItem::new(line)
-    }
+fn todo_item_to_list_item(value: &TodoItem) -> ListItem<'_> {
+    let line = match value.status {
+        Status::Todo => Line::styled(format!(" ☐ {}", value.todo), TEXT_FG_COLOR),
+        Status::Completed => {
+            Line::styled(format!(" ✓ {}", value.todo), COMPLETED_TEXT_FG_COLOR)
+        }
+    };
+    ListItem::new(line)
 }
