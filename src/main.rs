@@ -26,7 +26,7 @@ use ratatui::{
     symbols,
     text::Line,
     widgets::{
-        Block, Borders, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph,
+        Block, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph,
         StatefulWidget, Widget, Wrap,
     },
 };
@@ -46,6 +46,18 @@ fn main() -> Result<()> {
     app_result
 }
 
+enum AppState {
+    Viewing,
+    Adding(InputState),
+}
+
+#[derive(Default)]
+enum InputState {
+    #[default]
+    Title,
+    Info,
+}
+
 /// This struct holds the current state of the app. In particular, it has the `todo_list` field
 /// which is a wrapper around `ListState`. Keeping track of the state lets us render the
 /// associated widget with its state and have access to features such as natural scrolling.
@@ -55,6 +67,9 @@ fn main() -> Result<()> {
 struct App {
     should_exit: bool,
     todo_list: TodoList,
+    app_state: AppState,
+    new_todo_title: String,
+    new_todo_info: String,
 }
 
 struct TodoList {
@@ -111,7 +126,16 @@ impl Default for App {
                     "If you see this info that means I completed this task!",
                 ),
             ]),
+            app_state: AppState::Viewing,
+            new_todo_title: String::new(),
+            new_todo_info: String::new(),
         }
+    }
+}
+
+impl TodoList {
+    fn add_todo(&mut self, todo_item: TodoItem) {
+        self.items.push(todo_item);
     }
 }
 
@@ -151,17 +175,61 @@ impl App {
         if key.kind != KeyEventKind::Press {
             return;
         }
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => self.should_exit = true,
-            KeyCode::Char('h') | KeyCode::Left => self.select_none(),
-            KeyCode::Char('j') | KeyCode::Down => self.select_next(),
-            KeyCode::Char('k') | KeyCode::Up => self.select_previous(),
-            KeyCode::Char('g') | KeyCode::Home => self.select_first(),
-            KeyCode::Char('G') | KeyCode::End => self.select_last(),
-            KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
-                self.toggle_status();
-            }
-            _ => {}
+
+        match self.app_state {
+            AppState::Viewing => match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => self.should_exit = true,
+                KeyCode::Char('a') => {
+                    self.app_state = AppState::Adding(InputState::default());
+                }
+                KeyCode::Char('h') | KeyCode::Left => self.select_none(),
+                KeyCode::Char('j') | KeyCode::Down => self.select_next(),
+                KeyCode::Char('k') | KeyCode::Up => self.select_previous(),
+                KeyCode::Char('g') | KeyCode::Home => self.select_first(),
+                KeyCode::Char('G') | KeyCode::End => self.select_last(),
+                KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
+                    self.toggle_status();
+                }
+                _ => {}
+            },
+            AppState::Adding(ref mut input_state) => match key.code {
+                KeyCode::Tab => {
+                    *input_state = match input_state {
+                        InputState::Title => InputState::Info,
+                        InputState::Info => InputState::Title,
+                    }
+                }
+                KeyCode::Char(c) => match input_state {
+                    InputState::Title => self.new_todo_title.push(c),
+                    InputState::Info => self.new_todo_info.push(c),
+                },
+                KeyCode::Backspace => match input_state {
+                    InputState::Title => {
+                        self.new_todo_title.pop();
+                    }
+                    InputState::Info => {
+                        self.new_todo_info.pop();
+                    }
+                },
+                KeyCode::Esc => {
+                    self.app_state = AppState::Viewing;
+                    self.new_todo_title.clear();
+                    self.new_todo_info.clear();
+                }
+                KeyCode::Enter => {
+                    if !self.new_todo_title.is_empty() {
+                        self.todo_list.add_todo(TodoItem::new(
+                            Status::Todo,
+                            &self.new_todo_title,
+                            &self.new_todo_info,
+                        ));
+                        self.new_todo_title.clear();
+                        self.new_todo_info.clear();
+                        self.app_state = AppState::Viewing;
+                    }
+                }
+                _ => {}
+            },
         }
     }
 
@@ -204,13 +272,34 @@ impl Widget for &mut App {
         ])
         .areas(area);
 
-        let [list_area, item_area] =
-            Layout::vertical([Constraint::Fill(1), Constraint::Fill(1)]).areas(main_area);
-
         App::render_header(header_area, buf);
         App::render_footer(footer_area, buf);
-        self.render_list(list_area, buf);
-        self.render_selected_item(item_area, buf);
+
+        match &self.app_state {
+            AppState::Viewing => {
+                let [list_area, item_area] =
+                    Layout::vertical([Constraint::Fill(1), Constraint::Fill(1)]).areas(main_area);
+                App::render_list(
+                    &self.todo_list.items,
+                    list_area,
+                    buf,
+                    &mut self.todo_list.state,
+                );
+                self.render_selected_item(item_area, buf);
+            }
+            AppState::Adding(input_state) => {
+                let [list_area, item_area] =
+                    Layout::vertical([Constraint::Fill(1), Constraint::Fill(1)]).areas(main_area);
+                App::render_list(
+                    &self.todo_list.items,
+                    list_area,
+                    buf,
+                    &mut self.todo_list.state,
+                );
+                self.render_selected_item(item_area, buf);
+                self.render_add_new_modal(area, buf, input_state);
+            }
+        }
     }
 }
 
@@ -229,7 +318,7 @@ impl App {
             .render(area, buf);
     }
 
-    fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
+    fn render_list(items: &[TodoItem], area: Rect, buf: &mut Buffer, list_state: &mut ListState) {
         let block = Block::new()
             .title(Line::raw("TODO List").centered())
             .borders(Borders::TOP)
@@ -238,9 +327,7 @@ impl App {
             .bg(NORMAL_ROW_BG);
 
         // Iterate through all elements in the `items` and stylize them.
-        let items: Vec<ListItem> = self
-            .todo_list
-            .items
+        let items: Vec<ListItem> = items
             .iter()
             .enumerate()
             .map(|(i, todo_item)| {
@@ -258,7 +345,7 @@ impl App {
 
         // We need to disambiguate this trait method as both `Widget` and `StatefulWidget` share the
         // same method name `render`.
-        StatefulWidget::render(list, area, buf, &mut self.todo_list.state);
+        StatefulWidget::render(list, area, buf, list_state);
     }
 
     fn render_selected_item(&self, area: Rect, buf: &mut Buffer) {
@@ -288,6 +375,62 @@ impl App {
             .wrap(Wrap { trim: false })
             .render(area, buf);
     }
+    fn render_add_new_modal(&self, area: Rect, buf: &mut Buffer, input_state: &InputState) {
+        let modal_area = centered_rect(50, 50, area);
+        let [title_area, info_area] =
+            Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).areas(modal_area);
+
+        let title_block = Block::new()
+            .title("Title")
+            .borders(Borders::ALL)
+            .border_style(if matches!(input_state, InputState::Title) {
+                SELECTED_STYLE
+            } else {
+                Style::default()
+            });
+
+        let info_block = Block::new()
+            .title("Info")
+            .borders(Borders::ALL)
+            .border_style(if matches!(input_state, InputState::Info) {
+                SELECTED_STYLE
+            } else {
+                Style::default()
+            });
+
+        let title_paragraph = Paragraph::new(self.new_todo_title.as_str())
+            .block(title_block)
+            .fg(TEXT_FG_COLOR);
+
+        let info_paragraph = Paragraph::new(self.new_todo_info.as_str())
+            .block(info_block)
+            .fg(TEXT_FG_COLOR);
+
+        Clear.render(modal_area, buf);
+        Block::new()
+            .title("Add New Todo")
+            .borders(Borders::ALL)
+            .bg(NORMAL_ROW_BG)
+            .render(modal_area, buf);
+        title_paragraph.render(title_area, buf);
+        info_paragraph.render(info_area, buf);
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::vertical([
+        Constraint::Percentage((100 - percent_y) / 2),
+        Constraint::Percentage(percent_y),
+        Constraint::Percentage((100 - percent_y) / 2),
+    ])
+    .split(r);
+
+    Layout::horizontal([
+        Constraint::Percentage((100 - percent_x) / 2),
+        Constraint::Percentage(percent_x),
+        Constraint::Percentage((100 - percent_x) / 2),
+    ])
+    .split(popup_layout[1])[1]
 }
 
 const fn alternate_colors(i: usize) -> Color {
